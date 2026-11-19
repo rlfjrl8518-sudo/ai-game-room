@@ -196,10 +196,12 @@ $('#invite').onclick = () => {
       <button class="btn primary" id="copyUrl" style="flex:none;padding:6px 14px">복사</button></div>`);
     const inp = $('#inviteUrl'), btn = $('#copyUrl');
     inp.onfocus = () => inp.select();
-    btn.onclick = async () => {
-      try { await navigator.clipboard.writeText(url); }
-      catch { inp.select(); document.execCommand('copy'); }
-      btn.textContent = '복사됨'; setTimeout(() => btn.textContent = '복사', 1500);
+    btn.onclick = () => {
+      // execCommand는 동기라 Edge 앱 창·file://에서도 확실히 동작. 안 되면 Clipboard API로
+      inp.focus(); inp.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch {}
+      if(!ok) navigator.clipboard?.writeText(url).catch(() => {});
+      btn.textContent = ok ? '복사됨' : '선택됨 · Ctrl+C'; setTimeout(() => btn.textContent = '복사', 1800);
     };
   });
   peer.on('connection', conn => { if(online){ conn.close(); return; } netAttach(conn, 1); });
