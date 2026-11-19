@@ -80,7 +80,7 @@ canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:po
       <div class="status" id="gStatus"><div class="who"></div><div class="sub"></div></div>
       <div class="group"><span class="label">AI 난이도</span>
         <div class="seg" id="gLevel"><button data-v="0">쉬움</button><button data-v="1" aria-pressed="true">보통</button><button data-v="2">어려움</button></div></div>
-      <div class="group"><span class="label">내 돌 (AI 대국)</span>
+      <div class="group"><span class="label">내 돌</span>
         <div class="seg" id="gSide"><button data-v="1" aria-pressed="true">흑 (선수)</button><button data-v="2">백 (후수)</button></div></div>
       <div class="row"><button class="btn primary" id="gNew">새 대국</button><button class="btn" id="gUndo">한 수 무르기</button></div>
       <div class="tally" id="gTally"></div>
@@ -95,7 +95,7 @@ canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:po
       <div class="status" id="aStatus"><div class="who"></div><div class="sub"></div></div>
       <div class="group"><span class="label">AI 난이도</span>
         <div class="seg" id="aLevel"><button data-v="0">쉬움</button><button data-v="1" aria-pressed="true">보통</button><button data-v="2">어려움</button></div></div>
-      <div class="group"><span class="label">내 돌 (AI 대국)</span>
+      <div class="group"><span class="label">내 돌</span>
         <div class="seg" id="aSide"><button data-v="1" aria-pressed="true">흑 (선수)</button><button data-v="2">백 (후수)</button></div></div>
       <div class="row"><button class="btn primary" id="aNew">새 대국</button></div>
       <div class="tally" id="aTally"></div>
@@ -168,17 +168,21 @@ addEventListener('hashchange', () => show(location.hash.slice(1)));
 
 /* ---------- 온라인 대국 (PeerJS: 브라우저끼리 직접 연결, 로그인 없음) ---------- */
 // ponytail: PeerJS 공용 중계서버(0.peerjs.com) 사용. 회사망 등에서 연결이 막히면 TURN 서버 추가
-let online = null;   // 연결 중이면 {conn, me}  me: 1=흑(초대한 쪽) 2=백
+let online = null;   // 연결 중이면 {conn, me, host}  me: 1=흑 2=백 (처음엔 초대한 쪽이 흑, '내 돌'로 서로 바꿀 수 있음)
 const send = m => { if(online) online.conn.send(m); };
 const handlers = {};
 const netMsg = t => { $('#netMsg').innerHTML = t; };
 function netReady(){
-  netMsg(`<b>친구와 연결됨</b> · 나는 <b>${online.me===1?'흑 (선수)':'백 (후수)'}</b> · 탭을 바꾸면 상대 화면도 같이 바뀌어요.`);
+  netMsg(`<b>친구와 연결됨</b> · 나는 <b>${online.me===1?'흑 (선수)':'백 (후수)'}</b> · '내 돌'에서 누구나 흑/백을 고를 수 있어요. 탭을 바꾸면 상대 화면도 같이 바뀌어요.`);
+  for(const el of [$('#gSide'), $('#aSide')]) el.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v===online.me));
   gNew(); aNew();
 }
+// 온라인에서 '내 돌'을 누르면 내가 그 색, 상대는 반대 색으로 바뀌고 두 게임 모두 새로 시작
+function netSide(v){ if(online.me===v) return; online.me = v; send({t:'side', you:3-v}); netReady(); }
+handlers.side = m => { online.me = m.you; netReady(); };
 function netAttach(conn, me){
-  conn.on('open', () => { if(me===1){ online = {conn, me}; conn.send({t:'start', you:2}); netReady(); } });
-  conn.on('data', m => { if(m.t==='start'){ online = {conn, me:m.you}; netReady(); } else handlers[m.t]?.(m); });
+  conn.on('open', () => { if(me===1){ online = {conn, me, host:true}; conn.send({t:'start', you:2}); netReady(); } });
+  conn.on('data', m => { if(m.t==='start'){ online = {conn, me:m.you, host:false}; netReady(); } else handlers[m.t]?.(m); });
   conn.on('close', () => { online = null; netMsg('상대가 나갔어요. AI 대국으로 돌아갑니다.'); gNew(); aNew(); });
 }
 handlers.tab = m => { location.hash = m.v; };
@@ -217,14 +221,14 @@ if(room){
 
 /* ================= 오목 ================= */
 const N = 15, canvas = $('#gCanvas'), ctx = canvas.getContext('2d');
-let gb, gHist, gOver, gThinking, gHover = -1, gWinLine = null;
+let gb, gHist, gOver, gThinking, gHover = -1, gWinLine = null, gZapped = false, gFx = null;
 const gT = {w:0,l:0,d:0};
-const gLevel = seg($('#gLevel'), ()=>{}), gSide = seg($('#gSide'), () => { if(!online) gNew(); });
+const gLevel = seg($('#gLevel'), ()=>{}), gSide = seg($('#gSide'), v => { if(online) netSide(+v); else gNew(); });
 const human = () => online ? online.me : +gSide(), ai = () => 3 - human();
 const turn = () => gHist.length % 2 ? 2 : 1;
 
 function gNew(){
-  gb = new Array(N*N).fill(0); gHist = []; gOver = false; gThinking = false; gWinLine = null;
+  gb = new Array(N*N).fill(0); gHist = []; gOver = false; gThinking = false; gWinLine = null; gZapped = false; gFx = null;
   tally($('#gTally'), gT); gUpdate();
   if(!online && turn() !== human()) gAiTurn();
 }
@@ -237,6 +241,51 @@ function gPlace(i){
 }
 handlers.move = m => { if(!gOver && !gb[m.i] && turn() !== human()) gPlace(m.i); };
 handlers.gnew = () => gNew();
+// 히든: 주최자만, 대국당 1번, Alt+클릭으로 상대 돌 하나를 망치로 부숨 (양쪽 화면에 연출, 차례는 안 넘어감)
+handlers.gzap = m => gSmash(m.i);
+const SMASH_HIT = 380, SMASH_END = 1300;   // 망치가 닿는 시점 / 연출 끝 (ms)
+function gSmash(i){
+  const c = gb[i]; if(!c) return;
+  gb[i] = 0;
+  gFx = {i, c, t0:performance.now(), shards:Array.from({length:30}, () => ({a:Math.random()*7, v:1+Math.random()*2.6, r:Math.random()*7, w:(Math.random()-.5)*14, s:.18+Math.random()*.3}))};
+  setTimeout(() => canvas.animate([{transform:'translate(0,0)'},{transform:'translate(-9px,7px)'},{transform:'translate(8px,-6px)'},{transform:'translate(-6px,-4px)'},{transform:'translate(4px,5px)'},{transform:'translate(0,0)'}], 320), SMASH_HIT);
+  const tick = () => { if(!gFx) return; if(performance.now()-gFx.t0 < SMASH_END){ gDraw(); requestAnimationFrame(tick); } else { gFx = null; gUpdate(); } };
+  tick();
+  setTimeout(() => { if(gFx){ gFx = null; gUpdate(); } }, SMASH_END + 300);   // 백그라운드 창 대비
+}
+function drawSmash(cell, p){
+  const {i, c, t0, shards} = gFx, t = performance.now()-t0, x = p(i%N), y = p((i/N)|0);
+  const L = cell*2.4, hw = cell*.85, hh = cell*1.7;
+  const hammer = ang => {   // 오른쪽 손잡이 끝을 축으로 휘두름. ang=0이면 머리가 돌 위
+    ctx.save(); ctx.translate(x+L, y); ctx.rotate(ang);
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(-L, -cell*.11, L+cell*.2, cell*.22);
+    const g = ctx.createLinearGradient(-L-hw, 0, -L+hw, 0); g.addColorStop(0,'#c9d0d8'); g.addColorStop(1,'#3e4752');
+    ctx.fillStyle = g; ctx.fillRect(-L-hw, -hh, hw*2, hh); ctx.strokeStyle = '#1d2228'; ctx.lineWidth = 2; ctx.strokeRect(-L-hw, -hh, hw*2, hh);
+    ctx.restore();
+  };
+  if(t < SMASH_HIT){
+    const k = t/SMASH_HIT;
+    drawStone(ctx, x, y, cell*.45, c);
+    hammer(1.5*(1-k*k*k));   // 천천히 들었다가 확 내려침
+    return;
+  }
+  const u = Math.min(1, (t-SMASH_HIT)/(SMASH_END-SMASH_HIT));
+  if(u < .2) ctx.globalAlpha = 1-u/.2, hammer(0), ctx.globalAlpha = 1;
+  // 섬광 + 충격파
+  ctx.beginPath(); ctx.arc(x, y, cell*(1+u*2), 0, 7); ctx.fillStyle = `rgba(255,240,200,${Math.max(0, .9-u*3)})`; ctx.fill();
+  for(const [k, w] of [[1, 6], [.65, 3]]){ ctx.beginPath(); ctx.arc(x, y, cell*(.4+u*3.2*k), 0, 7); ctx.strokeStyle = `rgba(255,255,255,${1-u})`; ctx.lineWidth = w*(1-u)+1; ctx.stroke(); }
+  // 파편
+  const col = c===1 ? '#141414' : '#ece8df';
+  for(const sh of shards){
+    const d = sh.v*cell*(1-(1-u)*(1-u))*1.6, sx = x+Math.cos(sh.a)*d, sy = y+Math.sin(sh.a)*d + u*u*cell*1.8, sz = sh.s*cell*(1-u*.5);
+    ctx.save(); ctx.globalAlpha = 1-u; ctx.translate(sx, sy); ctx.rotate(sh.r+sh.w*u);
+    ctx.beginPath(); ctx.moveTo(-sz, -sz*.6); ctx.lineTo(sz, -sz*.2); ctx.lineTo(-sz*.2, sz); ctx.closePath();
+    ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = c===1 ? '#555' : '#999'; ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+  }
+  // 쾅!
+  if(u < .7){ ctx.save(); ctx.globalAlpha = 1-u/.7; ctx.font = `900 ${cell*(1.4+u)}px ${cssVar('--f-body')}`; ctx.textAlign = 'center';
+    ctx.lineWidth = 6; ctx.strokeStyle = '#000'; ctx.strokeText('쾅!', x, y-cell*1.2); ctx.fillStyle = '#ffcf33'; ctx.fillText('쾅!', x, y-cell*1.2); ctx.restore(); }
+}
 const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
 function fiveAt(i){
   const c = gb[i], x = i%N, y = (i/N)|0;
@@ -301,6 +350,11 @@ function gAiTurn(){
 canvas.addEventListener('pointermove', e => { const i = cellAt(e); if(i!==gHover){ gHover = i; gDraw(); } });
 canvas.addEventListener('pointerleave', () => { gHover = -1; gDraw(); });
 canvas.addEventListener('click', e => {
+  if(e.altKey && online?.host && !gZapped && !gOver){
+    const i = cellAt(e);
+    if(i >= 0 && gb[i] === 3-human()){ gZapped = true; send({t:'gzap', i}); gSmash(i); }
+    return;
+  }
   if(gOver || gThinking || turn()!==human()) return;
   const i = cellAt(e); if(i<0 || gb[i]) return;
   gPlace(i);
@@ -335,7 +389,8 @@ function gDraw(){
   drawBoard(ctx, S, N);
   for(let i=0;i<N*N;i++) if(gb[i]) drawStone(ctx, p(i%N), p((i/N)|0), cell*.45, gb[i]);
   if(gHover>=0 && !gb[gHover] && !gOver && !gThinking && turn()===human()) drawStone(ctx, p(gHover%N), p((gHover/N)|0), cell*.45, human(), .45);
-  if(gHist.length){ const l = gHist[gHist.length-1]; ctx.beginPath(); ctx.arc(p(l%N),p((l/N)|0),cell*.12,0,7); ctx.fillStyle = cssVar('--accent'); ctx.fill(); }
+  if(gHist.length && gb[gHist[gHist.length-1]]){ const l = gHist[gHist.length-1]; ctx.beginPath(); ctx.arc(p(l%N),p((l/N)|0),cell*.12,0,7); ctx.fillStyle = cssVar('--accent'); ctx.fill(); }
+  if(gFx) drawSmash(cell, p);
   if(gWinLine){
     const [[x1,y1],[x2,y2]] = gWinLine; ctx.strokeStyle = cssVar('--check'); ctx.lineWidth = cell*.12; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(p(x1),p(y1)); ctx.lineTo(p(x2),p(y2)); ctx.stroke();
@@ -347,16 +402,16 @@ function gDraw(){
 // ponytail: 샷만 주고받고 결과는 각자 계산(사칙연산+sqrt만 써서 결정적). 어긋나는 일이 생기면 정착 후 상태 동기화 추가
 const aCv = $('#aCanvas'), actx = aCv.getContext('2d');
 const R = 0.028, MU = 0.0002, VMAX = 0.024, E = 0.9, STEPS_PER_FRAME = 2, DRAG_MAX = 0.35;
-let stones, aTurn, aMoving, aOver, aDrag = null, aThinking = false;
+let stones, aTurn, aMoving, aOver, aDrag = null, aThinking = false, aZapped = false;
 const aT = {w:0,l:0,d:0};
-const aLevel = seg($('#aLevel'), ()=>{}), aSide = seg($('#aSide'), () => { if(!online) aNew(); });
+const aLevel = seg($('#aLevel'), ()=>{}), aSide = seg($('#aSide'), v => { if(online) netSide(+v); else aNew(); });
 const aHuman = () => online ? online.me : +aSide();
 
 function aNew(){
   const p = i => (i+.5)/15;
   stones = [];
   for(let k=1;k<=13;k+=2){ stones.push({x:p(k), y:p(12), vx:0, vy:0, c:1, on:true}); stones.push({x:p(k), y:p(2), vx:0, vy:0, c:2, on:true}); }
-  aTurn = 1; aMoving = false; aOver = false; aDrag = null; aAnim = null; aThinking = false;
+  aTurn = 1; aMoving = false; aOver = false; aDrag = null; aAnim = null; aThinking = false; aZapped = false;
   tally($('#aTally'), aT); aUpdate();
   if(!online && aTurn !== aHuman()) aAiTurn();
 }
@@ -417,6 +472,8 @@ handlers.shot = m => {
   if(!aOver && aTurn !== aHuman()) aShoot(m.i, m.vx, m.vy);
 };
 handlers.anew = () => aNew();
+// 히든: 주최자만, 대국당 1번, 내 차례에 Alt 누른 채 상대 돌을 당겨 쏘기 (그 샷이 내 차례를 씀).
+// 상대 쪽은 일반 'shot'으로 받으니 별도 처리 없음
 
 // AI: 내 돌 × 상대 돌 × 세기 3단계를 모두 시뮬레이션해서 가장 이득인 샷
 function aBest(){
@@ -444,11 +501,11 @@ function aAiTurn(){
 const aPos = e => { const r = aCv.getBoundingClientRect(); return {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.width}; };
 aCv.addEventListener('pointerdown', e => {
   if(aOver || aMoving || aThinking || aTurn !== aHuman()) return;
-  const p = aPos(e);
-  const i = stones.findIndex(s => s.on && s.c===aTurn && (s.x-p.x)**2 + (s.y-p.y)**2 < (R*1.4)**2);
+  const p = aPos(e), ctl = e.altKey && online?.host && !aZapped;
+  const i = stones.findIndex(s => s.on && (ctl ? s.c!==aTurn : s.c===aTurn) && (s.x-p.x)**2 + (s.y-p.y)**2 < (R*1.4)**2);
   if(i < 0) return;
   aCv.setPointerCapture(e.pointerId);
-  aDrag = {i, x:p.x, y:p.y}; aDraw();
+  aDrag = {i, x:p.x, y:p.y, ctl}; aDraw();
 });
 aCv.addEventListener('pointermove', e => { if(aDrag){ const p = aPos(e); aDrag.x = p.x; aDrag.y = p.y; aDraw(); } });
 function aShot(){
@@ -458,8 +515,9 @@ function aShot(){
 }
 aCv.addEventListener('pointerup', () => {
   if(!aDrag) return;
-  const sh = aShot(); aDrag = null;
+  const sh = aShot(), ctl = aDrag.ctl; aDrag = null;
   if(!sh){ aDraw(); return; }
+  if(ctl) aZapped = true;
   send({t:'shot', i:sh.i, vx:sh.vx, vy:sh.vy});
   aShoot(sh.i, sh.vx, sh.vy);
 });
