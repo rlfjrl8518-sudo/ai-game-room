@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0}</style>
+<title>AI 대국실 데스크톱</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@800&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: one game room — tabs on top, board as the hero, a quiet side panel for controls */
+:root{
+  --bg:#13171b; --panel:#1b2026; --line:#2a3139; --fg:#ebe6dc; --muted:#98a1a9; --accent:#d4a24c;
+  --kaya1:#e2b56b; --kaya2:#c8914a; --ink:#3a2814; --check:#c8553d;
+  --f-display:"Nanum Myeongjo",serif; --f-body:"IBM Plex Sans KR",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:960px;margin:0 auto;padding-block:24px 40px;display:flex;flex-direction:column;gap:20px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{font-family:var(--f-display);font-size:30px;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1 small{display:block;font-family:var(--f-body);font-size:12px;font-weight:500;color:var(--muted);letter-spacing:.14em;margin-bottom:4px}
+.tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px;gap:4px}
+.tabs button{all:unset;cursor:pointer;padding:8px 20px;border-radius:999px;color:var(--muted);font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--accent);color:#1a1306}
+.tabs button:focus-visible,.btn:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.net{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.net .btn{flex:none;padding:8px 14px}
+.net .msg{flex:1;min-width:200px;color:var(--muted);font-size:13px;line-height:1.6;word-break:break-all}
+.net .msg b{color:var(--fg)} .net .msg a{color:var(--accent)}
+.game{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;align-items:start}
+.game[hidden]{display:none}
+@media (max-width:820px){.game{grid-template-columns:minmax(0,1fr)}}
+.board-box{width:min(600px,100%);margin:0 auto}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.status{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px}
+.status .who{font-size:18px;font-weight:600;display:flex;align-items:center;gap:10px}
+.status .sub{color:var(--muted);font-size:13px}
+.dot{width:14px;height:14px;border-radius:50%;flex:none}
+.dot.b{background:radial-gradient(circle at 35% 30%,#666,#0b0b0b 70%)}
+.dot.w{background:radial-gradient(circle at 35% 30%,#fff,#cfcac0 75%)}
+.dot.think{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.status.win .who{color:var(--accent)}
+.group{display:flex;flex-direction:column;gap:8px}
+.label{font-size:11px;letter-spacing:.14em;color:var(--muted);font-weight:600}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;text-align:center;padding:8px 4px;font-size:13px;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--line);color:var(--fg);font-weight:600}
+.row{display:flex;gap:8px}
+.btn{all:unset;cursor:pointer;flex:1;text-align:center;padding:10px;border-radius:8px;font-weight:600;font-size:14px;border:1px solid var(--line)}
+.btn.primary{background:var(--accent);color:#1a1306;border-color:var(--accent)}
+.btn:hover{filter:brightness(1.1)}
+.tally{display:flex;gap:16px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tally b{color:var(--fg);font-size:16px}
+.note{color:var(--muted);font-size:12px;line-height:1.6}
+canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:pointer;
+  box-shadow:0 18px 40px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.2);touch-action:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><small>AI · 친구와 대국</small>AI 대국실</h1>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-view="gomoku">오목</button>
+      <button role="tab" aria-selected="false" data-view="alkkagi">알까기</button>
+    </div>
+  </header>
+
+  <div class="net">
+    <button class="btn" id="invite">친구 초대 링크 만들기</button>
+    <div class="msg" id="netMsg">링크를 보내면 상대는 로그인 없이 바로 들어와 오목·알까기를 함께 둘 수 있어요.</div>
+  </div>
+
+  <!-- 오목 -->
+  <section class="game" id="view-gomoku">
+    <div class="board-box"><canvas class="board" id="gCanvas" aria-label="15×15 오목판"></canvas></div>
+    <aside class="side">
+      <div class="status" id="gStatus"><div class="who"></div><div class="sub"></div></div>
+      <div class="group"><span class="label">AI 난이도</span>
+        <div class="seg" id="gLevel"><button data-v="0">쉬움</button><button data-v="1" aria-pressed="true">보통</button><button data-v="2">어려움</button></div></div>
+      <div class="group"><span class="label">내 돌 (AI 대국)</span>
+        <div class="seg" id="gSide"><button data-v="1" aria-pressed="true">흑 (선수)</button><button data-v="2">백 (후수)</button></div></div>
+      <div class="row"><button class="btn primary" id="gNew">새 대국</button><button class="btn" id="gUndo">한 수 무르기</button></div>
+      <div class="tally" id="gTally"></div>
+      <div class="note">15×15 판, 다섯 개 이상 연속이면 승리 (자유룰). 마지막 수는 금색 점으로 표시됩니다.</div>
+    </aside>
+  </section>
+
+  <!-- 알까기 -->
+  <section class="game" id="view-alkkagi" hidden>
+    <div class="board-box"><canvas class="board" id="aCanvas" aria-label="알까기 판"></canvas></div>
+    <aside class="side">
+      <div class="status" id="aStatus"><div class="who"></div><div class="sub"></div></div>
+      <div class="group"><span class="label">AI 난이도</span>
+        <div class="seg" id="aLevel"><button data-v="0">쉬움</button><button data-v="1" aria-pressed="true">보통</button><button data-v="2">어려움</button></div></div>
+      <div class="group"><span class="label">내 돌 (AI 대국)</span>
+        <div class="seg" id="aSide"><button data-v="1" aria-pressed="true">흑 (선수)</button><button data-v="2">백 (후수)</button></div></div>
+      <div class="row"><button class="btn primary" id="aNew">새 대국</button></div>
+      <div class="tally" id="aTally"></div>
+      <div class="note">내 돌을 누른 채 뒤로 당겼다 놓으면 반대쪽으로 튕겨 나가요. 상대 돌을 판 밖으로 모두 쳐내면 승리.</div>
+    </aside>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+function seg(el, onChange){
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return;
+    el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x===b));
+    onChange(b.dataset.v);
+  });
+  return () => el.querySelector('[aria-pressed="true"]').dataset.v;
+}
+function setStatus(el, who, sub, dotCls, win){
+  el.classList.toggle('win', !!win);
+  el.querySelector('.who').innerHTML = (dotCls ? `<span class="dot ${dotCls}"></span>` : '') + who;
+  el.querySelector('.sub').textContent = sub || '';
+}
+function tally(el, t){ el.innerHTML = `<span>승 <b>${t.w}</b></span><span>패 <b>${t.l}</b></span><span>무 <b>${t.d}</b></span>`; }
+const colName = c => c===1 ? '흑' : '백', colCls = c => c===1 ? 'b' : 'w';
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// 공용: 비자나무 판 배경 + 15줄 격자
+function drawBoard(ctx, S, N){
+  const cell = S/N, p = i => cell*(i+.5);
+  const g = ctx.createLinearGradient(0,0,S,S); g.addColorStop(0,cssVar('--kaya1')); g.addColorStop(1,cssVar('--kaya2'));
+  ctx.fillStyle = g; ctx.fillRect(0,0,S,S);
+  ctx.globalAlpha = .07; ctx.strokeStyle = '#5a3a14';
+  for(let k=0;k<40;k++){ ctx.beginPath(); const yy = (k*37.3)%S; ctx.moveTo(0,yy); ctx.bezierCurveTo(S*.3,yy+8,S*.6,yy-8,S,yy+4); ctx.lineWidth = 1+(k%3); ctx.stroke(); }
+  ctx.globalAlpha = 1; ctx.strokeStyle = cssVar('--ink'); ctx.lineWidth = 1;
+  for(let i=0;i<N;i++){
+    ctx.beginPath(); ctx.moveTo(p(0),p(i)); ctx.lineTo(p(N-1),p(i)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p(i),p(0)); ctx.lineTo(p(i),p(N-1)); ctx.stroke();
+  }
+  ctx.lineWidth = 2; ctx.strokeRect(p(0),p(0),p(N-1)-p(0),p(N-1)-p(0));
+  ctx.fillStyle = cssVar('--ink');
+  for(const [a,b] of [[3,3],[3,11],[11,3],[11,11],[7,7]]){ ctx.beginPath(); ctx.arc(p(a),p(b),cell*.09,0,7); ctx.fill(); }
+}
+function drawStone(ctx, cx, cy, r, c, alpha=1){
+  ctx.globalAlpha = alpha;
+  ctx.beginPath(); ctx.arc(cx+1.5,cy+2,r,0,7); ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fill();
+  const rg = ctx.createRadialGradient(cx-r*.35,cy-r*.4,r*.1,cx,cy,r);
+  if(c===1){ rg.addColorStop(0,'#6b6b6b'); rg.addColorStop(1,'#0b0b0c'); } else { rg.addColorStop(0,'#ffffff'); rg.addColorStop(1,'#cdc8bd'); }
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.fillStyle = rg; ctx.fill();
+  ctx.globalAlpha = 1;
+}
+function fitCanvas(cv, ctx){
+  const dpr = devicePixelRatio||1, S = cv.clientWidth;
+  if(cv.width !== Math.round(S*dpr)){ cv.width = cv.height = Math.round(S*dpr); }
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return S;
+}
+
+/* ---------- 탭 (한 번에 한 게임만 표시) ---------- */
+function show(view){
+  if(view!=='alkkagi') view='gomoku';
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view===view));
+  $('#view-gomoku').hidden = view!=='gomoku';
+  $('#view-alkkagi').hidden = view!=='alkkagi';
+  if(view==='gomoku') gDraw(); else aDraw();
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { location.hash = b.dataset.view; send({t:'tab', v:b.dataset.view}); });
+addEventListener('hashchange', () => show(location.hash.slice(1)));
+
+/* ---------- 온라인 대국 (PeerJS: 브라우저끼리 직접 연결, 로그인 없음) ---------- */
+// ponytail: PeerJS 공용 중계서버(0.peerjs.com) 사용. 회사망 등에서 연결이 막히면 TURN 서버 추가
+let online = null;   // 연결 중이면 {conn, me}  me: 1=흑(초대한 쪽) 2=백
+const send = m => { if(online) online.conn.send(m); };
+const handlers = {};
+const netMsg = t => { $('#netMsg').innerHTML = t; };
+function netReady(){
+  netMsg(`<b>친구와 연결됨</b> · 나는 <b>${online.me===1?'흑 (선수)':'백 (후수)'}</b> · 탭을 바꾸면 상대 화면도 같이 바뀌어요.`);
+  gNew(); aNew();
+}
+function netAttach(conn, me){
+  conn.on('open', () => { if(me===1){ online = {conn, me}; conn.send({t:'start', you:2}); netReady(); } });
+  conn.on('data', m => { if(m.t==='start'){ online = {conn, me:m.you}; netReady(); } else handlers[m.t]?.(m); });
+  conn.on('close', () => { online = null; netMsg('상대가 나갔어요. AI 대국으로 돌아갑니다.'); gNew(); aNew(); });
+}
+handlers.tab = m => { location.hash = m.v; };
+$('#invite').onclick = () => {
+  if(online) return;
+  netMsg('링크 만드는 중…');
+  const peer = new Peer();
+  peer.on('open', id => {
+    // 바탕화면 앱(file://)에서 만든 링크도 상대가 열 수 있게 웹 주소로
+    const base = location.protocol==='file:' ? 'https://rlfjrl8518-sudo.github.io/ai-game-room/' : location.href.split(/[?#]/)[0];
+    const url = base + '?room=' + id;
+    navigator.clipboard?.writeText(url).catch(()=>{});
+    netMsg(`이 링크를 상대에게 보내세요 (복사됨). 상대가 들어오면 바로 시작해요. 이 창은 닫지 마세요.<br><a href="${url}">${url}</a>`);
+  });
+  peer.on('connection', conn => { if(online){ conn.close(); return; } netAttach(conn, 1); });
+  peer.on('error', e => netMsg('연결 오류: ' + e.type));
+};
+const room = new URLSearchParams(location.search).get('room');
+if(room){
+  netMsg('상대에게 연결 중…');
+  const peer = new Peer();
+  peer.on('open', () => netAttach(peer.connect(room, {reliable:true}), 2));
+  peer.on('error', e => netMsg(e.type==='peer-unavailable' ? '방이 없어요. 초대한 사람이 창을 닫았는지 확인해 주세요.' : '연결 오류: ' + e.type));
+}
+
+/* ================= 오목 ================= */
+const N = 15, canvas = $('#gCanvas'), ctx = canvas.getContext('2d');
+let gb, gHist, gOver, gThinking, gHover = -1, gWinLine = null;
+const gT = {w:0,l:0,d:0};
+const gLevel = seg($('#gLevel'), ()=>{}), gSide = seg($('#gSide'), () => { if(!online) gNew(); });
+const human = () => online ? online.me : +gSide(), ai = () => 3 - human();
+const turn = () => gHist.length % 2 ? 2 : 1;
+
+function gNew(){
+  gb = new Array(N*N).fill(0); gHist = []; gOver = false; gThinking = false; gWinLine = null;
+  tally($('#gTally'), gT); gUpdate();
+  if(!online && turn() !== human()) gAiTurn();
+}
+function gPlace(i){
+  gb[i] = turn(); gHist.push(i);
+  const line = fiveAt(i);
+  if(line){ gOver = true; gWinLine = line; gb[i]===human() ? gT.w++ : gT.l++; tally($('#gTally'), gT); }
+  else if(gHist.length === N*N){ gOver = true; gT.d++; tally($('#gTally'), gT); }
+  gUpdate();
+}
+handlers.move = m => { if(!gOver && !gb[m.i] && turn() !== human()) gPlace(m.i); };
+handlers.gnew = () => gNew();
+const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+function fiveAt(i){
+  const c = gb[i], x = i%N, y = (i/N)|0;
+  for(const [dx,dy] of DIRS){
+    let a = 0, b = 0;
+    while(at(x+(a+1)*dx, y+(a+1)*dy) === c) a++;
+    while(at(x-(b+1)*dx, y-(b+1)*dy) === c) b++;
+    if(a+b+1 >= 5) return [[x-b*dx,y-b*dy],[x+a*dx,y+a*dy]];
+  }
+  return null;
+}
+function at(x,y){ return x<0||y<0||x>=N||y>=N ? -1 : gb[y*N+x]; }
+
+// 패턴 점수: 9칸 창(중앙=둘 자리)에서 중앙을 포함하는 가장 강한 모양
+const PATS = [
+  ['xxxxx',1e6,5],['_xxxx_',5e4,4.5],
+  ['xxxx_',3000,4],['_xxxx',3000,4],['xxx_x',3000,4],['x_xxx',3000,4],['xx_xx',3000,4],
+  ['_xxx_',1200,3],['_xx_x_',1100,3],['_x_xx_',1100,3],
+  ['xxx__',150,2],['__xxx',150,2],['xx_x_',130,2],['_x_xx',130,2],['x_xx_',130,2],['_xx_x',130,2],['xx__x',100,2],['x__xx',100,2],
+  ['__xx__',120,1],['_xx__',80,1],['__xx_',80,1],['_x_x_',60,1],['_x__x_',40,1],
+  ['x',1,0]
+];
+function pointScore(i, c){
+  const x = i%N, y = (i/N)|0; let sum = 0, fours = 0, threes = 0;
+  for(const [dx,dy] of DIRS){
+    let s = '';
+    for(let k=-4;k<=4;k++){
+      const v = k===0 ? c : at(x+k*dx, y+k*dy);
+      s += v===c ? 'x' : v===0 ? '_' : 'o';
+    }
+    for(const [p,sc,t] of PATS){
+      let j = s.indexOf(p), hit = false;
+      while(j !== -1){ if(j<=4 && 4<j+p.length){ hit = true; break; } j = s.indexOf(p, j+1); }
+      if(hit){ sum += sc; if(t>=4) fours++; else if(t===3) threes++; break; }
+    }
+  }
+  if(fours >= 2 || (fours && threes)) sum += 2e4;   // 4-4, 4-3
+  else if(threes >= 2) sum += 8000;                 // 3-3
+  return sum;
+}
+function gBest(){
+  if(!gHist.length) return 7*N+7;
+  const lvl = +gLevel(), me = ai(), you = human(), cand = [];
+  for(let i=0;i<N*N;i++){
+    if(gb[i]) continue;
+    const x = i%N, y = (i/N)|0; let near = false;
+    for(let dy=-2;dy<=2 && !near;dy++) for(let dx=-2;dx<=2;dx++){ const v = at(x+dx,y+dy); if(v>0){ near = true; break; } }
+    if(!near) continue;
+    const a = pointScore(i, me), d = pointScore(i, you);
+    const defW = [0.55, 0.9, 1][lvl];
+    cand.push([a >= 1e6 ? 1e9 : a*1.1 + d*defW + Math.random()*(lvl===0?60:5), i]);
+  }
+  cand.sort((p,q) => q[0]-p[0]);
+  // ponytail: 휴리스틱 1수 평가. 더 세게 하려면 상위 후보로 VCF/알파베타 탐색 추가
+  const pick = lvl===0 && cand[0][0] < 1e9 ? Math.floor(Math.random()*Math.min(3,cand.length)) : 0;
+  return cand[pick][1];
+}
+function gAiTurn(){
+  gThinking = true; gUpdate();
+  setTimeout(() => { if(online) return; gThinking = false; gPlace(gBest()); }, 350);
+}
+canvas.addEventListener('pointermove', e => { const i = cellAt(e); if(i!==gHover){ gHover = i; gDraw(); } });
+canvas.addEventListener('pointerleave', () => { gHover = -1; gDraw(); });
+canvas.addEventListener('click', e => {
+  if(gOver || gThinking || turn()!==human()) return;
+  const i = cellAt(e); if(i<0 || gb[i]) return;
+  gPlace(i);
+  if(online) send({t:'move', i}); else if(!gOver) gAiTurn();
+});
+function cellAt(e){
+  const r = canvas.getBoundingClientRect(), cell = r.width/N;
+  const x = Math.floor((e.clientX-r.left)/cell), y = Math.floor((e.clientY-r.top)/cell);
+  return x<0||y<0||x>=N||y>=N ? -1 : y*N+x;
+}
+$('#gNew').onclick = () => { send({t:'gnew'}); gNew(); };
+$('#gUndo').onclick = () => {
+  if(online || gThinking || !gHist.length) return;   // 온라인 대국은 무르기 없음
+  if(gOver){ gOver = false; gWinLine = null; }
+  do { gb[gHist.pop()] = 0; } while(gHist.length && turn()!==human());
+  if(turn()!==human()) gAiTurn(); else gUpdate();
+};
+function gUpdate(){
+  const st = $('#gStatus'), foe = online ? '상대' : 'AI';
+  if(gOver){
+    const w = gHist.length ? gb[gHist[gHist.length-1]] : 0;
+    if(!gWinLine) setStatus(st, '무승부', '판이 가득 찼습니다.');
+    else if(w===human()) setStatus(st, '승리했습니다', `${gHist.length}수 만에 오목 완성`, colCls(w), true);
+    else setStatus(st, `${foe} 승리`, online ? '새 대국을 눌러 다시 둘 수 있어요.' : '한 수 무르기로 다시 볼 수 있어요.', colCls(w));
+  } else if(turn() !== human()) setStatus(st, online ? '상대 차례' : 'AI가 생각 중…', `${gHist.length+1}수째`, 'think');
+  else setStatus(st, `내 차례 (${colName(human())})`, `${gHist.length+1}수째 · 원하는 교차점을 누르세요`, colCls(human()));
+  gDraw();
+}
+function gDraw(){
+  if(!gb || canvas.offsetParent===null) return;
+  const S = fitCanvas(canvas, ctx), cell = S/N, p = i => cell*(i+.5);
+  drawBoard(ctx, S, N);
+  for(let i=0;i<N*N;i++) if(gb[i]) drawStone(ctx, p(i%N), p((i/N)|0), cell*.45, gb[i]);
+  if(gHover>=0 && !gb[gHover] && !gOver && !gThinking && turn()===human()) drawStone(ctx, p(gHover%N), p((gHover/N)|0), cell*.45, human(), .45);
+  if(gHist.length){ const l = gHist[gHist.length-1]; ctx.beginPath(); ctx.arc(p(l%N),p((l/N)|0),cell*.12,0,7); ctx.fillStyle = cssVar('--accent'); ctx.fill(); }
+  if(gWinLine){
+    const [[x1,y1],[x2,y2]] = gWinLine; ctx.strokeStyle = cssVar('--check'); ctx.lineWidth = cell*.12; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(p(x1),p(y1)); ctx.lineTo(p(x2),p(y2)); ctx.stroke();
+  }
+}
+
+/* ================= 알까기 ================= */
+// 판 좌표는 0~1. 돌 중심이 판 밖으로 나가면 떨어짐. 고정 스텝 물리라 두 화면이 같은 결과를 냄
+// ponytail: 샷만 주고받고 결과는 각자 계산(사칙연산+sqrt만 써서 결정적). 어긋나는 일이 생기면 정착 후 상태 동기화 추가
+const aCv = $('#aCanvas'), actx = aCv.getContext('2d');
+const R = 0.028, MU = 0.0002, VMAX = 0.024, E = 0.9, STEPS_PER_FRAME = 2, DRAG_MAX = 0.35;
+let stones, aTurn, aMoving, aOver, aDrag = null, aPending = null, aThinking = false;
+const aT = {w:0,l:0,d:0};
+const aLevel = seg($('#aLevel'), ()=>{}), aSide = seg($('#aSide'), () => { if(!online) aNew(); });
+const aHuman = () => online ? online.me : +aSide();
+
+function aNew(){
+  const p = i => (i+.5)/15;
+  stones = [];
+  for(let k=1;k<=13;k+=2){ stones.push({x:p(k), y:p(12), vx:0, vy:0, c:1, on:true}); stones.push({x:p(k), y:p(2), vx:0, vy:0, c:2, on:true}); }
+  aTurn = 1; aMoving = false; aOver = false; aDrag = null; aPending = null; aThinking = false;
+  tally($('#aTally'), aT); aUpdate();
+  if(!online && aTurn !== aHuman()) aAiTurn();
+}
+function physStep(S){
+  for(const s of S){
+    if(!s.on) continue;
+    const sp = Math.sqrt(s.vx*s.vx + s.vy*s.vy);
+    if(sp <= MU){ s.vx = s.vy = 0; continue; }
+    const k = (sp-MU)/sp; s.vx *= k; s.vy *= k; s.x += s.vx; s.y += s.vy;
+  }
+  for(let i=0;i<S.length;i++){ const a = S[i]; if(!a.on) continue;
+    for(let j=i+1;j<S.length;j++){ const b = S[j]; if(!b.on) continue;
+      const dx = b.x-a.x, dy = b.y-a.y, d2 = dx*dx+dy*dy;
+      if(d2 >= 4*R*R || d2 === 0) continue;
+      const d = Math.sqrt(d2), nx = dx/d, ny = dy/d, push = (2*R-d)/2;
+      a.x -= nx*push; a.y -= ny*push; b.x += nx*push; b.y += ny*push;
+      const vn = (a.vx-b.vx)*nx + (a.vy-b.vy)*ny;
+      if(vn > 0){ const imp = (1+E)/2*vn; a.vx -= imp*nx; a.vy -= imp*ny; b.vx += imp*nx; b.vy += imp*ny; }
+    }
+  }
+  let moving = false;
+  for(const s of S){
+    if(!s.on) continue;
+    if(s.x<0 || s.x>1 || s.y<0 || s.y>1){ s.on = false; continue; }
+    if(s.vx || s.vy) moving = true;
+  }
+  return moving;
+}
+const count = (S, c) => S.filter(s => s.on && s.c===c).length;
+
+function aShoot(i, vx, vy){
+  stones[i].vx = vx; stones[i].vy = vy; aMoving = true; aDrag = null; aUpdate();
+  const loop = () => {
+    let moving = true;
+    for(let k=0;k<STEPS_PER_FRAME && moving;k++) moving = physStep(stones);
+    aDraw();
+    if(moving) requestAnimationFrame(loop); else aSettle();
+  };
+  requestAnimationFrame(loop);
+}
+function aSettle(){
+  aMoving = false;
+  const b = count(stones,1), w = count(stones,2), me = aHuman();
+  if(!b || !w){
+    aOver = true;
+    if(!b && !w) aT.d++; else ((b ? 1 : 2)===me ? aT.w++ : aT.l++);
+    tally($('#aTally'), aT);
+  } else aTurn = 3 - aTurn;
+  aUpdate();
+  if(aPending){ const m = aPending; aPending = null; handlers.shot(m); }
+  else if(!aOver && !online && aTurn !== me) aAiTurn();
+}
+handlers.shot = m => { if(aMoving){ aPending = m; return; } if(!aOver && aTurn !== aHuman()) aShoot(m.i, m.vx, m.vy); };
+handlers.anew = () => aNew();
+
+// AI: 내 돌 × 상대 돌 × 세기 3단계를 모두 시뮬레이션해서 가장 이득인 샷
+function aBest(){
+  const me = 3 - aHuman(), lvl = +aLevel(); let best = null, bestV = -Infinity;
+  stones.forEach((s, i) => { if(!s.on || s.c!==me) return;
+    stones.forEach(t => { if(!t.on || t.c===me) return;
+      const dx = t.x-s.x, dy = t.y-s.y, d = Math.sqrt(dx*dx+dy*dy);
+      for(const pw of [0.55, 0.8, 1]){
+        const vx = dx/d*VMAX*pw, vy = dy/d*VMAX*pw;
+        const S = stones.map(o => ({...o})); S[i].vx = vx; S[i].vy = vy;
+        for(let n=0;n<4000 && physStep(S);n++);
+        let v = (count(stones,3-me)-count(S,3-me))*10 - (count(stones,me)-count(S,me))*12 + Math.random();
+        for(const o of S) if(o.on && o.c===me) v -= Math.abs(o.x-.5) + Math.abs(o.y-.5);   // 가장자리 돌은 위험
+        if(v > bestV){ bestV = v; best = {i, vx, vy}; }
+      }
+    });
+  });
+  const err = [0.14, 0.05, 0][lvl] * (Math.random()*2-1), c = Math.cos(err), s = Math.sin(err);
+  return {i:best.i, vx:best.vx*c - best.vy*s, vy:best.vx*s + best.vy*c};
+}
+function aAiTurn(){
+  aThinking = true; aUpdate();
+  setTimeout(() => { if(online || aOver) return; aThinking = false; const b = aBest(); aShoot(b.i, b.vx, b.vy); }, 600);
+}
+const aPos = e => { const r = aCv.getBoundingClientRect(); return {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.width}; };
+aCv.addEventListener('pointerdown', e => {
+  if(aOver || aMoving || aThinking || aTurn !== aHuman()) return;
+  const p = aPos(e);
+  const i = stones.findIndex(s => s.on && s.c===aTurn && (s.x-p.x)**2 + (s.y-p.y)**2 < (R*1.4)**2);
+  if(i < 0) return;
+  aCv.setPointerCapture(e.pointerId);
+  aDrag = {i, x:p.x, y:p.y}; aDraw();
+});
+aCv.addEventListener('pointermove', e => { if(aDrag){ const p = aPos(e); aDrag.x = p.x; aDrag.y = p.y; aDraw(); } });
+function aShot(){
+  const s = stones[aDrag.i]; let dx = s.x-aDrag.x, dy = s.y-aDrag.y;
+  const len = Math.sqrt(dx*dx+dy*dy), pw = Math.min(len, DRAG_MAX)/DRAG_MAX;
+  return len < 0.02 ? null : {i:aDrag.i, vx:dx/len*VMAX*pw, vy:dy/len*VMAX*pw, pw};
+}
+aCv.addEventListener('pointerup', () => {
+  if(!aDrag) return;
+  const sh = aShot(); aDrag = null;
+  if(!sh){ aDraw(); return; }
+  send({t:'shot', i:sh.i, vx:sh.vx, vy:sh.vy});
+  aShoot(sh.i, sh.vx, sh.vy);
+});
+aCv.addEventListener('pointercancel', () => { aDrag = null; aDraw(); });
+$('#aNew').onclick = () => { send({t:'anew'}); aNew(); };
+
+function aUpdate(){
+  const st = $('#aStatus'), me = aHuman(), foe = online ? '상대' : 'AI';
+  const left = `흑 ${count(stones,1)}개 · 백 ${count(stones,2)}개 남음`;
+  if(aOver){
+    const b = count(stones,1), w = count(stones,2);
+    if(!b && !w) setStatus(st, '무승부', '두 돌이 함께 떨어졌어요.');
+    else if((b ? 1 : 2)===me) setStatus(st, '승리했습니다', left, colCls(me), true);
+    else setStatus(st, `${foe} 승리`, '새 대국을 눌러 다시 해보세요.', colCls(3-me));
+  } else if(aMoving) setStatus(st, '굴러가는 중…', left, colCls(aTurn));
+  else if(aTurn !== me) setStatus(st, online ? '상대 차례' : 'AI가 겨누는 중…', left, 'think');
+  else setStatus(st, `내 차례 (${colName(me)})`, left + ' · 내 돌을 당겼다 놓으세요', colCls(me));
+  aDraw();
+}
+function aDraw(){
+  if(!stones || aCv.offsetParent===null) return;
+  const S = fitCanvas(aCv, actx);
+  drawBoard(actx, S, 15);
+  for(const s of stones) if(s.on) drawStone(actx, s.x*S, s.y*S, R*S, s.c);
+  if(aDrag){
+    const sh = aShot(), s = stones[aDrag.i];
+    actx.beginPath(); actx.arc(s.x*S, s.y*S, R*S+3, 0, 7); actx.strokeStyle = cssVar('--accent'); actx.lineWidth = 2; actx.stroke();
+    if(sh){
+      const L = (0.08 + sh.pw*0.4)*S, ux = sh.vx/(VMAX*sh.pw), uy = sh.vy/(VMAX*sh.pw);
+      actx.setLineDash([6,6]); actx.lineWidth = 3; actx.lineCap = 'round';
+      actx.beginPath(); actx.moveTo(s.x*S, s.y*S); actx.lineTo(s.x*S+ux*L, s.y*S+uy*L); actx.stroke(); actx.setLineDash([]);
+      actx.fillStyle = cssVar('--accent'); actx.font = `600 13px ${cssVar('--f-body')}`;
+      actx.fillText(Math.round(sh.pw*100)+'%', s.x*S + 14, s.y*S - 14);
+    }
+  }
+}
+addEventListener('resize', () => { gDraw(); aDraw(); });
+
+/* 시작 */
+gNew(); aNew();
+show(location.hash.slice(1));
+</script>
