@@ -336,7 +336,7 @@ function gDraw(){
 // ponytail: 샷만 주고받고 결과는 각자 계산(사칙연산+sqrt만 써서 결정적). 어긋나는 일이 생기면 정착 후 상태 동기화 추가
 const aCv = $('#aCanvas'), actx = aCv.getContext('2d');
 const R = 0.028, MU = 0.0002, VMAX = 0.024, E = 0.9, STEPS_PER_FRAME = 2, DRAG_MAX = 0.35;
-let stones, aTurn, aMoving, aOver, aDrag = null, aPending = null, aThinking = false;
+let stones, aTurn, aMoving, aOver, aDrag = null, aThinking = false;
 const aT = {w:0,l:0,d:0};
 const aLevel = seg($('#aLevel'), ()=>{}), aSide = seg($('#aSide'), () => { if(!online) aNew(); });
 const aHuman = () => online ? online.me : +aSide();
@@ -345,7 +345,7 @@ function aNew(){
   const p = i => (i+.5)/15;
   stones = [];
   for(let k=1;k<=13;k+=2){ stones.push({x:p(k), y:p(12), vx:0, vy:0, c:1, on:true}); stones.push({x:p(k), y:p(2), vx:0, vy:0, c:2, on:true}); }
-  aTurn = 1; aMoving = false; aOver = false; aDrag = null; aPending = null; aThinking = false;
+  aTurn = 1; aMoving = false; aOver = false; aDrag = null; aAnim = null; aThinking = false;
   tally($('#aTally'), aT); aUpdate();
   if(!online && aTurn !== aHuman()) aAiTurn();
 }
@@ -376,15 +376,19 @@ function physStep(S){
 }
 const count = (S, c) => S.filter(s => s.on && s.c===c).length;
 
+// 결과는 즉시 계산하고 화면은 녹화된 프레임을 재생 → 창이 가려져 애니메이션이 멈춰도 게임은 진행됨
+let aAnim = null;
+const FRAME_MS = 1000/60;
 function aShoot(i, vx, vy){
-  stones[i].vx = vx; stones[i].vy = vy; aMoving = true; aDrag = null; aUpdate();
-  const loop = () => {
-    let moving = true;
-    for(let k=0;k<STEPS_PER_FRAME && moving;k++) moving = physStep(stones);
-    aDraw();
-    if(moving) requestAnimationFrame(loop); else aSettle();
-  };
-  requestAnimationFrame(loop);
+  stones[i].vx = vx; stones[i].vy = vy; aDrag = null;
+  const frames = []; let moving = true;
+  for(let n=1; moving && n<20000; n++){ moving = physStep(stones); if(n % STEPS_PER_FRAME === 0) frames.push(stones.map(s => [s.x, s.y, s.on])); }
+  const anim = aAnim = {frames, t0:performance.now()};
+  aMoving = true; aUpdate();
+  const finish = () => { if(aAnim !== anim) return; aAnim = null; aSettle(); };
+  const tick = () => { if(aAnim !== anim) return; if(performance.now()-anim.t0 >= frames.length*FRAME_MS) finish(); else { aDraw(); requestAnimationFrame(tick); } };
+  requestAnimationFrame(tick);
+  setTimeout(finish, frames.length*FRAME_MS + 300);   // 백그라운드 탭 대비
 }
 function aSettle(){
   aMoving = false;
@@ -395,10 +399,12 @@ function aSettle(){
     tally($('#aTally'), aT);
   } else aTurn = 3 - aTurn;
   aUpdate();
-  if(aPending){ const m = aPending; aPending = null; handlers.shot(m); }
-  else if(!aOver && !online && aTurn !== me) aAiTurn();
+  if(!aOver && !online && aTurn !== me) aAiTurn();
 }
-handlers.shot = m => { if(aMoving){ aPending = m; return; } if(!aOver && aTurn !== aHuman()) aShoot(m.i, m.vx, m.vy); };
+handlers.shot = m => {
+  if(aAnim){ aAnim = null; aSettle(); }   // 내 화면 재생이 늦으면 건너뛰고 바로 반영
+  if(!aOver && aTurn !== aHuman()) aShoot(m.i, m.vx, m.vy);
+};
 handlers.anew = () => aNew();
 
 // AI: 내 돌 × 상대 돌 × 세기 3단계를 모두 시뮬레이션해서 가장 이득인 샷
@@ -466,7 +472,8 @@ function aDraw(){
   if(!stones || aCv.offsetParent===null) return;
   const S = fitCanvas(aCv, actx);
   drawBoard(actx, S, 15);
-  for(const s of stones) if(s.on) drawStone(actx, s.x*S, s.y*S, R*S, s.c);
+  const f = aAnim && aAnim.frames[Math.min(aAnim.frames.length-1, Math.floor((performance.now()-aAnim.t0)/FRAME_MS))];
+  stones.forEach((s, k) => { const [x, y, on] = f ? f[k] : [s.x, s.y, s.on]; if(on) drawStone(actx, x*S, y*S, R*S, s.c); });
   if(aDrag){
     const sh = aShot(), s = stones[aDrag.i];
     actx.beginPath(); actx.arc(s.x*S, s.y*S, R*S+3, 0, 7); actx.strokeStyle = cssVar('--accent'); actx.lineWidth = 2; actx.stroke();
