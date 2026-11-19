@@ -190,8 +190,17 @@ $('#invite').onclick = () => {
     // 바탕화면 앱(file://)에서 만든 링크도 상대가 열 수 있게 웹 주소로
     const base = location.protocol==='file:' ? 'https://rlfjrl8518-sudo.github.io/ai-game-room/' : location.href.split(/[?#]/)[0];
     const url = base + '?room=' + id;
-    navigator.clipboard?.writeText(url).catch(()=>{});
-    netMsg(`이 링크를 상대에게 보내세요 (복사됨). 상대가 들어오면 바로 시작해요. 이 창은 닫지 마세요.<br><a href="${url}">${url}</a>`);
+    // 복사는 버튼 클릭(사용자 동작) 안에서 해야 브라우저가 허용함
+    netMsg(`이 링크를 상대에게 보내세요. 상대가 들어오면 바로 시작해요. 이 창은 닫지 마세요.
+      <div class="row" style="margin-top:6px"><input id="inviteUrl" readonly value="${url}" style="flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit">
+      <button class="btn primary" id="copyUrl" style="flex:none;padding:6px 14px">복사</button></div>`);
+    const inp = $('#inviteUrl'), btn = $('#copyUrl');
+    inp.onfocus = () => inp.select();
+    btn.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); }
+      catch { inp.select(); document.execCommand('copy'); }
+      btn.textContent = '복사됨'; setTimeout(() => btn.textContent = '복사', 1500);
+    };
   });
   peer.on('connection', conn => { if(online){ conn.close(); return; } netAttach(conn, 1); });
   peer.on('error', e => netMsg('연결 오류: ' + e.type));
