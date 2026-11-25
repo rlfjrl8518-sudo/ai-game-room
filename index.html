@@ -56,6 +56,10 @@ h1 small{display:block;font-family:var(--f-body);font-size:12px;font-weight:500;
 .note{color:var(--muted);font-size:12px;line-height:1.6}
 canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:pointer;
   box-shadow:0 18px 40px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.2);touch-action:none}
+canvas.board.pitch{aspect-ratio:162/114;border-radius:10px}
+.dot.r{background:#d9473b} .dot.u{background:#2f74d0}
+.score{display:flex;align-items:center;justify-content:center;gap:14px;background:#0d1013;border:1px solid var(--line);border-radius:12px;padding:10px;font-size:30px;font-weight:600;font-variant-numeric:tabular-nums}
+.score span{font-size:12px;font-weight:600;letter-spacing:.1em;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 
@@ -65,12 +69,13 @@ canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:po
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-view="gomoku">오목</button>
       <button role="tab" aria-selected="false" data-view="alkkagi">알까기</button>
+      <button role="tab" aria-selected="false" data-view="soccer">축구</button>
     </div>
   </header>
 
   <div class="net">
     <button class="btn" id="invite">친구 초대 링크 만들기</button>
-    <div class="msg" id="netMsg">링크를 보내면 상대는 로그인 없이 바로 들어와 오목·알까기를 함께 둘 수 있어요.</div>
+    <div class="msg" id="netMsg">링크를 보내면 상대는 로그인 없이 바로 들어와 오목·알까기·축구를 함께 둘 수 있어요.</div>
   </div>
 
   <!-- 오목 -->
@@ -100,6 +105,22 @@ canvas.board{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:po
       <div class="row"><button class="btn primary" id="aNew">새 대국</button></div>
       <div class="tally" id="aTally"></div>
       <div class="note">내 돌을 누른 채 뒤로 당겼다 놓으면 반대쪽으로 튕겨 나가요. 상대 돌을 판 밖으로 모두 쳐내면 승리.</div>
+    </aside>
+  </section>
+
+  <!-- 축구 -->
+  <section class="game" id="view-soccer" hidden>
+    <div class="board-box"><canvas class="board pitch" id="sCanvas" aria-label="축구 경기장"></canvas></div>
+    <aside class="side">
+      <div class="score" id="sScore"></div>
+      <div class="status" id="sStatus"><div class="who"></div><div class="sub"></div></div>
+      <div class="group"><span class="label">AI 난이도</span>
+        <div class="seg" id="sLevel"><button data-v="0">쉬움</button><button data-v="1" aria-pressed="true">보통</button><button data-v="2">어려움</button></div></div>
+      <div class="group"><span class="label">내 팀</span>
+        <div class="seg" id="sSide"><button data-v="1" aria-pressed="true">빨강 (선축)</button><button data-v="2">파랑</button></div></div>
+      <div class="row"><button class="btn primary" id="sNew">새 경기</button></div>
+      <div class="tally" id="sTally"></div>
+      <div class="note">한 턴에 내 선수 하나를 당겼다 놓아 공을 차요. 3골 먼저 넣으면 승리. 노란 테두리가 골키퍼, 골 먹은 팀이 킥오프.</div>
     </aside>
   </section>
 </div>
@@ -157,11 +178,11 @@ function fitCanvas(cv, ctx){
 
 /* ---------- 탭 (한 번에 한 게임만 표시) ---------- */
 function show(view){
-  if(view!=='alkkagi') view='gomoku';
+  const draw = {gomoku:gDraw, alkkagi:aDraw, soccer:sDraw};
+  if(!draw[view]) view='gomoku';
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view===view));
-  $('#view-gomoku').hidden = view!=='gomoku';
-  $('#view-alkkagi').hidden = view!=='alkkagi';
-  if(view==='gomoku') gDraw(); else aDraw();
+  for(const v in draw) $('#view-'+v).hidden = v!==view;
+  draw[view]();
 }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { location.hash = b.dataset.view; send({t:'tab', v:b.dataset.view}); });
 addEventListener('hashchange', () => show(location.hash.slice(1)));
@@ -173,9 +194,9 @@ const send = m => { if(online) online.conn.send(m); };
 const handlers = {};
 const netMsg = t => { $('#netMsg').innerHTML = t; };
 function netReady(){
-  netMsg(`<b>친구와 연결됨</b> · 나는 <b>${online.me===1?'흑 (선수)':'백 (후수)'}</b> · '내 돌'에서 누구나 흑/백을 고를 수 있어요. 탭을 바꾸면 상대 화면도 같이 바뀌어요.`);
-  for(const el of [$('#gSide'), $('#aSide')]) el.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v===online.me));
-  gNew(); aNew();
+  netMsg(`<b>친구와 연결됨</b> · 나는 <b>${online.me===1?'흑·빨강 (선수)':'백·파랑 (후수)'}</b> · '내 돌'·'내 팀'에서 누구나 흑/백을 고를 수 있어요. 탭을 바꾸면 상대 화면도 같이 바뀌어요.`);
+  for(const el of [$('#gSide'), $('#aSide'), $('#sSide')]) el.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v===online.me));
+  gNew(); aNew(); sNew();
 }
 // 온라인에서 '내 돌'을 누르면 내가 그 색, 상대는 반대 색으로 바뀌고 두 게임 모두 새로 시작
 function netSide(v){ if(online.me===v) return; online.me = v; send({t:'side', you:3-v}); netReady(); }
@@ -183,7 +204,7 @@ handlers.side = m => { online.me = m.you; netReady(); };
 function netAttach(conn, me){
   conn.on('open', () => { if(me===1){ online = {conn, me, host:true}; conn.send({t:'start', you:2}); netReady(); } });
   conn.on('data', m => { if(m.t==='start'){ online = {conn, me:m.you, host:false}; netReady(); } else handlers[m.t]?.(m); });
-  conn.on('close', () => { online = null; netMsg('상대가 나갔어요. AI 대국으로 돌아갑니다.'); gNew(); aNew(); });
+  conn.on('close', () => { online = null; netMsg('상대가 나갔어요. AI 대국으로 돌아갑니다.'); gNew(); aNew(); sNew(); });
 }
 handlers.tab = m => { location.hash = m.v; };
 $('#invite').onclick = () => {
@@ -555,9 +576,217 @@ function aDraw(){
     }
   }
 }
-addEventListener('resize', () => { gDraw(); aDraw(); });
+/* ================= 축구 ================= */
+// 턴제 판 축구: 내 선수 하나를 당겼다 놓아 공을 참. 좌표 단위는 경기장 세로=1, 가로=SW.
+// 알까기처럼 결정적 물리 → 온라인은 킥만 주고받고 양쪽이 같은 결과를 계산
+const sCv = $('#sCanvas'), sctx = sCv.getContext('2d');
+const SW = 1.5, SM = 0.07, RP = 0.034, RB = 0.022, GY0 = 0.38, GY1 = 0.62;
+const SV = 0.026, PMU = 0.00025, BMU = 0.0004, SE = 0.85, WE = 0.7, SDRAG = 0.35, GOALS = 3;
+const TEAM = ['', '#d9473b', '#2f74d0'], tName = c => c===1 ? '빨강' : '파랑', tCls = c => c===1 ? 'r' : 'u';
+const FORM = [[.06,.5],[.28,.3],[.28,.7],[.55,.36],[.55,.64]];   // 0번 = 골키퍼
+let sp, sTurn, sMoving, sOver, sDrag = null, sThinking = false, sAnim = null, sGoals, sFlash = null;
+const sT = {w:0,l:0,d:0};
+const sLevel = seg($('#sLevel'), ()=>{}), sSide = seg($('#sSide'), v => { if(online) netSide(+v); else sNew(); });
+const sHuman = () => online ? online.me : +sSide();
+
+function sKickoff(){
+  sp = [{x:SW/2, y:.5, vx:0, vy:0, r:RB, m:.5, c:0}];
+  for(const c of [1,2]) FORM.forEach(([x,y], n) => sp.push({x:c===1 ? x : SW-x, y, vx:0, vy:0, r:RP, m:1, c, n}));
+}
+function sNew(){
+  sKickoff(); sGoals = [0,0,0]; sTurn = 1; sMoving = sOver = sThinking = false; sDrag = sAnim = sFlash = null;
+  tally($('#sTally'), sT); sUpdate();
+  if(!online && sTurn !== sHuman()) sAiTurn();
+}
+// 한 스텝: 골이면 넣은 팀(1/2), 움직이는 중이면 0, 모두 멈추면 -1
+function sStep(S){
+  for(const s of S){
+    const v = Math.sqrt(s.vx*s.vx + s.vy*s.vy), mu = s.c ? PMU : BMU;
+    if(v <= mu){ s.vx = s.vy = 0; continue; }
+    const k = (v-mu)/v; s.vx *= k; s.vy *= k; s.x += s.vx; s.y += s.vy;
+  }
+  for(let i=0;i<S.length;i++){ const a = S[i];
+    for(let j=i+1;j<S.length;j++){ const b = S[j];
+      const dx = b.x-a.x, dy = b.y-a.y, d2 = dx*dx+dy*dy, rr = a.r+b.r;
+      if(d2 >= rr*rr || d2 === 0) continue;
+      const d = Math.sqrt(d2), nx = dx/d, ny = dy/d, o = (rr-d)/(a.m+b.m);
+      a.x -= nx*o*b.m; a.y -= ny*o*b.m; b.x += nx*o*a.m; b.y += ny*o*a.m;
+      const vn = (a.vx-b.vx)*nx + (a.vy-b.vy)*ny;
+      if(vn > 0){ const J = (1+SE)*vn/(1/a.m+1/b.m); a.vx -= J/a.m*nx; a.vy -= J/a.m*ny; b.vx += J/b.m*nx; b.vy += J/b.m*ny; }
+    }
+  }
+  const ball = S[0];
+  if(ball.y > GY0 && ball.y < GY1){ if(ball.x < 0) return 2; if(ball.x > SW) return 1; }
+  let moving = false;
+  for(const s of S){
+    const mouth = !s.c && s.y > GY0 && s.y < GY1;   // 골문 앞은 공만 통과
+    if(s.x < s.r && !mouth){ s.x = s.r; s.vx = Math.abs(s.vx)*WE; }
+    if(s.x > SW-s.r && !mouth){ s.x = SW-s.r; s.vx = -Math.abs(s.vx)*WE; }
+    if(s.y < s.r){ s.y = s.r; s.vy = Math.abs(s.vy)*WE; }
+    if(s.y > 1-s.r){ s.y = 1-s.r; s.vy = -Math.abs(s.vy)*WE; }
+    if(s.vx || s.vy) moving = true;
+  }
+  return moving ? 0 : -1;
+}
+
+function sShoot(i, vx, vy){
+  sp[i].vx = vx; sp[i].vy = vy; sDrag = null;
+  const frames = []; let r = 0;
+  for(let n=1; r===0 && n<20000; n++){ r = sStep(sp); if(n % STEPS_PER_FRAME === 0 || r) frames.push(sp.map(s => [s.x, s.y])); }
+  const anim = sAnim = {frames, t0:performance.now(), goal:Math.max(r, 0)};
+  sMoving = true; sUpdate();
+  const finish = () => { if(sAnim !== anim) return; sAnim = null; sSettle(anim.goal); };
+  const tick = () => { if(sAnim !== anim) return; if(performance.now()-anim.t0 >= frames.length*FRAME_MS) finish(); else { sDraw(); requestAnimationFrame(tick); } };
+  requestAnimationFrame(tick);
+  setTimeout(finish, frames.length*FRAME_MS + 300);   // 백그라운드 창 대비
+}
+function sSettle(goal){
+  sMoving = false;
+  if(goal){
+    sGoals[goal]++;
+    const f = sFlash = {c:goal, t0:performance.now()};
+    const tick = () => { if(sFlash !== f) return; if(performance.now()-f.t0 < 1500){ sDraw(); requestAnimationFrame(tick); } else { sFlash = null; sDraw(); } };
+    requestAnimationFrame(tick);
+    if(sGoals[goal] >= GOALS){ sOver = true; goal===sHuman() ? sT.w++ : sT.l++; tally($('#sTally'), sT); }
+    else { sKickoff(); sTurn = 3-goal; }   // 먹은 팀이 킥오프
+  } else sTurn = 3 - sTurn;
+  sUpdate();
+  if(!sOver && !online && sTurn !== sHuman()) sAiTurn();
+}
+handlers.kick = m => {
+  if(sAnim){ const g = sAnim.goal; sAnim = null; sSettle(g); }   // 재생이 늦으면 건너뛰고 반영
+  if(!sOver && sTurn !== sHuman()) sShoot(m.i, m.vx, m.vy);
+};
+handlers.snew = () => sNew();
+
+// AI: 선수 5명 × 골문 세 곳 겨냥 × 세기 3단계를 시뮬레이션. 골 > 공 전진 > 우리 골문 근처 위험 순으로 평가
+// ponytail: 한 수 앞만 봄. 더 세게 하려면 상대 응수까지 2수 탐색
+function sBest(){
+  const me = 3 - sHuman(), lvl = +sLevel(), dir = me===1 ? 1 : -1, tx = me===1 ? SW+.05 : -.05, own = me===1 ? 0 : SW, b = sp[0];
+  let best = null, bestV = -Infinity;
+  sp.forEach((s, i) => { if(s.c !== me) return;
+    for(const ty of [.43, .5, .57]){
+      let ux = tx-b.x, uy = ty-b.y; const ul = Math.sqrt(ux*ux+uy*uy); ux /= ul; uy /= ul;
+      const dx = b.x-ux*(RP+RB)-s.x, dy = b.y-uy*(RP+RB)-s.y, d = Math.sqrt(dx*dx+dy*dy);
+      if(d < 1e-6) continue;
+      for(const pw of [.5, .75, 1]){
+        const vx = dx/d*SV*pw, vy = dy/d*SV*pw, S = sp.map(o => ({...o}));
+        S[i].vx = vx; S[i].vy = vy;
+        let r = 0; for(let n=0; r===0 && n<6000; n++) r = sStep(S);
+        let v = r===me ? 1000 : r>0 ? -1000 : (S[0].x-b.x)*dir*10 - Math.max(0, .5-Math.abs(S[0].x-own))*20;
+        v += Math.random()*[4, 1, .2][lvl];
+        if(v > bestV){ bestV = v; best = {i, vx, vy}; }
+      }
+    }
+  });
+  const err = [0.12, 0.05, 0][lvl]*(Math.random()*2-1), c = Math.cos(err), sn = Math.sin(err);
+  return {i:best.i, vx:best.vx*c - best.vy*sn, vy:best.vx*sn + best.vy*c};
+}
+function sAiTurn(){
+  sThinking = true; sUpdate();
+  setTimeout(() => { if(online || sOver) return; sThinking = false; const b = sBest(); sShoot(b.i, b.vx, b.vy); }, 700);
+}
+
+const sPos = e => { const r = sCv.getBoundingClientRect(), k = r.width/(SW+2*SM); return {x:(e.clientX-r.left)/k-SM, y:(e.clientY-r.top)/k-SM}; };
+sCv.addEventListener('pointerdown', e => {
+  if(sOver || sMoving || sThinking || sTurn !== sHuman()) return;
+  const p = sPos(e), i = sp.findIndex(s => s.c===sTurn && (s.x-p.x)**2 + (s.y-p.y)**2 < (RP*1.5)**2);
+  if(i < 0) return;
+  sCv.setPointerCapture(e.pointerId);
+  sDrag = {i, x:p.x, y:p.y}; sDraw();
+});
+sCv.addEventListener('pointermove', e => { if(sDrag){ const p = sPos(e); sDrag.x = p.x; sDrag.y = p.y; sDraw(); } });
+function sKick(){
+  const s = sp[sDrag.i], dx = s.x-sDrag.x, dy = s.y-sDrag.y;
+  const len = Math.sqrt(dx*dx+dy*dy), pw = Math.min(len, SDRAG)/SDRAG;
+  return len < 0.02 ? null : {i:sDrag.i, vx:dx/len*SV*pw, vy:dy/len*SV*pw, pw};
+}
+sCv.addEventListener('pointerup', () => {
+  if(!sDrag) return;
+  const k = sKick(); sDrag = null;
+  if(!k){ sDraw(); return; }
+  send({t:'kick', i:k.i, vx:k.vx, vy:k.vy});
+  sShoot(k.i, k.vx, k.vy);
+});
+sCv.addEventListener('pointercancel', () => { sDrag = null; sDraw(); });
+$('#sNew').onclick = () => { send({t:'snew'}); sNew(); };
+
+function sUpdate(){
+  const st = $('#sStatus'), me = sHuman(), foe = online ? '상대' : 'AI';
+  $('#sScore').innerHTML = `<span>빨강</span>${sGoals[1]} : ${sGoals[2]}<span>파랑</span>`;
+  const sub = `${GOALS}골 먼저 넣으면 승리`;
+  if(sOver){
+    const w = sGoals[1] >= GOALS ? 1 : 2;
+    if(w===me) setStatus(st, '승리했습니다', `${sGoals[1]} : ${sGoals[2]}`, tCls(me), true);
+    else setStatus(st, `${foe} 승리`, '새 경기를 눌러 다시 해보세요.', tCls(w));
+  } else if(sMoving) setStatus(st, '공이 굴러가는 중…', sub, tCls(sTurn));
+  else if(sTurn !== me) setStatus(st, online ? '상대 차례' : 'AI가 노리는 중…', sub, 'think');
+  else setStatus(st, `내 차례 (${tName(me)})`, sub + ' · 내 선수를 당겼다 놓으세요', tCls(me));
+  sDraw();
+}
+function sDraw(){
+  if(!sp || sCv.offsetParent===null) return;
+  const dpr = devicePixelRatio||1, Wc = sCv.clientWidth, Hc = sCv.clientHeight;
+  if(sCv.width !== Math.round(Wc*dpr)){ sCv.width = Math.round(Wc*dpr); sCv.height = Math.round(Hc*dpr); }
+  const c = sctx, k = Wc/(SW+2*SM), P = v => (v+SM)*k;
+  c.setTransform(dpr,0,0,dpr,0,0);
+  // 잔디
+  c.fillStyle = '#2c6328'; c.fillRect(0,0,Wc,Hc);
+  for(let n=0;n<12;n++){ c.fillStyle = n%2 ? '#3d8a37' : '#46973f'; c.fillRect(P(SW*n/12), P(0), SW/12*k+1, k); }
+  // 라인
+  c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = 2;
+  const box = (x,y,w,h) => c.strokeRect(P(x),P(y),w*k,h*k);
+  box(0,0,SW,1); box(0,.22,.22,.56); box(SW-.22,.22,.22,.56); box(0,.34,.08,.32); box(SW-.08,.34,.08,.32);
+  c.beginPath(); c.moveTo(P(SW/2),P(0)); c.lineTo(P(SW/2),P(1)); c.stroke();
+  c.beginPath(); c.arc(P(SW/2),P(.5),.13*k,0,7); c.stroke();
+  c.fillStyle = '#fff'; c.beginPath(); c.arc(P(SW/2),P(.5),3,0,7); c.fill();
+  // 골대 + 그물
+  const gd = SM*.8;
+  for(const gx of [-gd, SW]){
+    c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(P(gx),P(GY0),gd*k,(GY1-GY0)*k);
+    c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.beginPath();
+    for(let t=0;t<=gd+1e-9;t+=gd/4){ c.moveTo(P(gx+t),P(GY0)); c.lineTo(P(gx+t),P(GY1)); }
+    for(let t=GY0;t<=GY1+1e-9;t+=(GY1-GY0)/8){ c.moveTo(P(gx),P(t)); c.lineTo(P(gx+gd),P(t)); }
+    c.stroke(); c.strokeStyle = '#fff'; c.lineWidth = 3; c.strokeRect(P(gx),P(GY0),gd*k,(GY1-GY0)*k);
+  }
+  // 선수·공
+  const f = sAnim && sAnim.frames[Math.min(sAnim.frames.length-1, Math.floor((performance.now()-sAnim.t0)/FRAME_MS))];
+  const myTurn = !sOver && !sMoving && !sThinking && sTurn===sHuman();
+  sp.forEach((s, i) => {
+    const [x, y] = f ? f[i] : [s.x, s.y], X = P(x), Y = P(y), r = s.r*k;
+    c.beginPath(); c.arc(X+2, Y+3, r, 0, 7); c.fillStyle = 'rgba(0,0,0,.3)'; c.fill();
+    if(!s.c){
+      const g = c.createRadialGradient(X-r*.3, Y-r*.35, r*.1, X, Y, r); g.addColorStop(0,'#fff'); g.addColorStop(1,'#cfcfcf');
+      c.beginPath(); c.arc(X, Y, r, 0, 7); c.fillStyle = g; c.fill(); c.strokeStyle = '#222'; c.lineWidth = 1; c.stroke();
+      c.beginPath(); for(let a=0;a<5;a++){ const t = a*1.2566-1.57; c.lineTo(X+Math.cos(t)*r*.42, Y+Math.sin(t)*r*.42); } c.closePath(); c.fillStyle = '#222'; c.fill();
+      return;
+    }
+    const g = c.createRadialGradient(X-r*.3, Y-r*.35, r*.1, X, Y, r); g.addColorStop(0,'rgba(255,255,255,.35)'); g.addColorStop(1,'rgba(0,0,0,.2)');
+    c.beginPath(); c.arc(X, Y, r, 0, 7); c.fillStyle = TEAM[s.c]; c.fill(); c.fillStyle = g; c.fill();
+    c.lineWidth = s.n===0 ? 3.5 : 2; c.strokeStyle = s.n===0 ? '#f5c518' : '#fff'; c.stroke();
+    c.fillStyle = '#fff'; c.font = `700 ${Math.round(r*.95)}px ${cssVar('--f-body')}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(s.n+1, X, Y+1);
+    if(myTurn && s.c===sTurn && !sDrag){ c.beginPath(); c.arc(X, Y, r+5, 0, 7); c.strokeStyle = 'rgba(212,162,76,.6)'; c.lineWidth = 2; c.stroke(); }
+  });
+  if(sDrag){
+    const sh = sKick(), s = sp[sDrag.i];
+    c.beginPath(); c.arc(P(s.x), P(s.y), RP*k+4, 0, 7); c.strokeStyle = cssVar('--accent'); c.lineWidth = 3; c.stroke();
+    if(sh){
+      const L = (0.08 + sh.pw*0.45)*k, ux = sh.vx/(SV*sh.pw), uy = sh.vy/(SV*sh.pw);
+      c.setLineDash([6,6]); c.lineWidth = 3; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(P(s.x), P(s.y)); c.lineTo(P(s.x)+ux*L, P(s.y)+uy*L); c.stroke(); c.setLineDash([]);
+      c.fillStyle = '#fff'; c.font = `600 13px ${cssVar('--f-body')}`; c.textAlign = 'left'; c.fillText(Math.round(sh.pw*100)+'%', P(s.x)+16, P(s.y)-16);
+    }
+  }
+  if(sFlash){
+    const u = (performance.now()-sFlash.t0)/1500;
+    c.save(); c.globalAlpha = Math.max(0, 1-u*u); c.font = `900 ${Math.round(k*.22*(1+u*.3))}px ${cssVar('--f-body')}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.lineWidth = 8; c.strokeStyle = '#000'; c.strokeText('골!', Wc/2, Hc/2); c.fillStyle = TEAM[sFlash.c]; c.fillText('골!', Wc/2, Hc/2); c.restore();
+  }
+}
+addEventListener('resize', () => { gDraw(); aDraw(); sDraw(); });
 
 /* 시작 */
-gNew(); aNew();
+gNew(); aNew(); sNew();
 show(location.hash.slice(1));
 </script>
